@@ -93,9 +93,6 @@ jobs:
       - name: Install build tools
         run: pip install hatch hatchling build twine
 
-      - name: Set version from tag
-        run: hatch version ${{ needs.details.outputs.new_version }}${{ needs.details.outputs.suffix }}
-
       - name: Install package with dev extras
         run: pip install ".[dev]"
 
