@@ -1,17 +1,56 @@
-.. Raster2poly documentation master file, created by
-   sphinx-quickstart on Fri Apr 10 17:13:50 2026.
-   You can adapt this file completely to your liking, but it should at least
-   contain the root `toctree` directive.
+raster2poly |version|
+=====================
 
-Raster2poly documentation
-=========================
+.. image:: https://img.shields.io/pypi/v/raster2poly.svg
+   :target: https://pypi.org/project/raster2poly/
+.. image:: https://img.shields.io/pypi/pyversions/raster2poly.svg
+.. image:: https://readthedocs.org/projects/raster2poly/badge/
+   :target: https://raster2poly.readthedocs.io
 
-Add your content using ``reStructuredText`` syntax. See the
-`reStructuredText <https://www.sphinx-doc.org/en/master/usage/restructuredtext/index.html>`_
-documentation for details.
+**Classify rasters and vectorise the result to clean, dissolved polygons
+— in three lines of code.**
 
+.. code-block:: python
+
+   from raster2poly import RasterClassifier
+
+   clf = RasterClassifier("satellite.tif")
+   gdf = clf.unsupervised(n_clusters=6)
+   clf.save(gdf, "classes.gpkg")
+
+----
 
 .. toctree::
    :maxdepth: 2
-   :caption: Contents:
+   :caption: Getting Started
 
+   introduction
+   installation
+   quickstart
+
+.. toctree::
+   :maxdepth: 2
+   :caption: User Guide
+
+   methods
+   cookbook
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Reference
+
+   api
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Development
+
+   contributing
+   changelog
+
+
+Indices
+-------
+
+* :ref:`genindex`
+* :ref:`modindex`
