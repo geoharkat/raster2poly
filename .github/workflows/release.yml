@@ -1,0 +1,179 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+"
+      - "[0-9]+.[0-9]+.[0-9]+a[0-9]+"
+      - "[0-9]+.[0-9]+.[0-9]+b[0-9]+"
+      - "[0-9]+.[0-9]+.[0-9]+rc[0-9]+"
+
+env:
+  PACKAGE_NAME: "raster2poly"
+  OWNER: "geoharkat"
+
+jobs:
+  # ── 1. Extract version from git tag ──
+  details:
+    runs-on: ubuntu-latest
+    outputs:
+      new_version: ${{ steps.release.outputs.new_version }}
+      suffix: ${{ steps.release.outputs.suffix }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      is_prerelease: ${{ steps.release.outputs.is_prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract tag and details
+        id: release
+        run: |
+          if [ "${{ github.ref_type }}" != "tag" ]; then
+            echo "::error::No tag found"
+            exit 1
+          fi
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          NEW_VERSION=$(echo "$TAG_NAME" | grep -oP '^[0-9]+\.[0-9]+\.[0-9]+')
+          SUFFIX=$(echo "$TAG_NAME" | grep -oP '[a-z]+[0-9]+$' || echo "")
+          IS_PRE=$( [ -n "$SUFFIX" ] && echo "true" || echo "false" )
+
+          echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+          echo "suffix=$SUFFIX"           >> "$GITHUB_OUTPUT"
+          echo "tag_name=$TAG_NAME"       >> "$GITHUB_OUTPUT"
+          echo "is_prerelease=$IS_PRE"    >> "$GITHUB_OUTPUT"
+
+          echo "### Release details" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Key | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-----|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Tag | \`$TAG_NAME\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Version | \`$NEW_VERSION\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Suffix | \`${SUFFIX:-none}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Pre-release | $IS_PRE |" >> "$GITHUB_STEP_SUMMARY"
+
+  # ── 2. Guard: version must be newer than PyPI ──
+  check_pypi:
+    needs: details
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch latest version from PyPI
+        id: pypi
+        run: |
+          RESPONSE=$(curl -sf "https://pypi.org/pypi/${{ env.PACKAGE_NAME }}/json" || echo '{}')
+          LATEST=$(echo "$RESPONSE" | jq -r 'select(.info != null) | .info.version // "0.0.0"')
+          echo "latest=$LATEST" >> "$GITHUB_OUTPUT"
+          echo "Latest PyPI version: $LATEST"
+
+      - name: Compare versions
+        run: |
+          NEW="${{ needs.details.outputs.new_version }}"
+          OLD="${{ steps.pypi.outputs.latest }}"
+          HIGHER=$(printf '%s\n' "$OLD" "$NEW" | sort -V | tail -1)
+          if [ "$HIGHER" = "$OLD" ] && [ "$NEW" != "$OLD" ] || [ "$NEW" = "$OLD" ]; then
+            echo "::error::$NEW is not newer than $OLD on PyPI"
+            exit 1
+          fi
+          echo "$NEW > $OLD ✓"
+
+  # ── 3. Build, test, package ──
+  build:
+    needs: [details, check_pypi]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install build tools
+        run: pip install hatch hatchling build twine
+
+      - name: Set version from tag
+        run: hatch version ${{ needs.details.outputs.new_version }}${{ needs.details.outputs.suffix }}
+
+      - name: Install package with dev extras
+        run: pip install ".[dev]"
+
+      - name: Run tests
+        run: pytest --tb=short -q
+
+      - name: Build sdist + wheel
+        if: matrix.python-version == '3.12'
+        run: python -m build
+
+      - name: Verify distributions
+        if: matrix.python-version == '3.12'
+        run: twine check dist/*
+
+      - name: Upload build artifacts
+        if: matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  # ── 4. Publish to PyPI (trusted publisher) ──
+  pypi_publish:
+    name: Publish to PyPI
+    needs: [build, details]
+    runs-on: ubuntu-latest
+    environment:
+      name: release
+      url: https://pypi.org/project/${{ env.PACKAGE_NAME }}/${{ needs.details.outputs.new_version }}/
+    permissions:
+      id-token: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  # ── 5. Create GitHub Release ──
+  github_release:
+    name: GitHub Release
+    needs: [build, details]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Get commits since last tag
+          PREV_TAG=$(git tag --sort=-v:refname | head -2 | tail -1 || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            NOTES=$(git log --pretty=format:"- %s (%h)" "$PREV_TAG"..HEAD)
+          else
+            NOTES=$(git log --pretty=format:"- %s (%h)" HEAD~20..HEAD)
+          fi
+          # Write to file (handles multiline)
+          echo "$NOTES" > /tmp/changelog.md
+          echo "Generated $(echo "$NOTES" | wc -l) changelog entries"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ needs.details.outputs.tag_name }}" dist/* \
+            --title "v${{ needs.details.outputs.tag_name }}" \
+            --notes-file /tmp/changelog.md \
+            ${{ needs.details.outputs.is_prerelease == 'true' && '--prerelease' || '' }}
