@@ -1,6 +1,10 @@
 import os, sys
 sys.path.insert(0, os.path.abspath("../../src"))
-
+import shutil
+nb_src = os.path.abspath("../../examples/raster2poly_cookbook.ipynb")
+nb_dst = os.path.join(os.path.dirname(__file__), "notebooks", "raster2poly_cookbook.ipynb")
+os.makedirs(os.path.dirname(nb_dst), exist_ok=True)
+shutil.copy2(nb_src, nb_dst)
 project = "raster2poly"
 copyright = "2026, Ismail Harkat"
 author = "Ismail Harkat"
