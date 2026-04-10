@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "raster2poly"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Classify rasters (KMeans, Random Forest, DN rules) and vectorise to polygons."
 readme = "README.md"
 license = "MIT"
@@ -45,3 +45,6 @@ packages = ["src/raster2poly"]
 [tool.ruff]
 target-version = "py39"
 line-length = 100
+
+[tool.hatch.version]
+path = "src/raster2poly/__init__.py"
